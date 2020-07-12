@@ -1,0 +1,6 @@
+apiVersion: sidecar.bvwells.github.com/v1alpha1
+kind: SidecarOperator
+metadata:
+  name: sidecaroperator-sample
+spec:
+  image: "alpine:latest"

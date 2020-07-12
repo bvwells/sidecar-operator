@@ -1,0 +1,20 @@
+# permissions for end users to view sidecaroperators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sidecaroperator-viewer-role
+rules:
+- apiGroups:
+  - sidecar.bvwells.github.com
+  resources:
+  - sidecaroperators
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - sidecar.bvwells.github.com
+  resources:
+  - sidecaroperators/status
+  verbs:
+  - get

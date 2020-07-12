@@ -1,0 +1,24 @@
+# permissions for end users to edit sidecaroperators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sidecaroperator-editor-role
+rules:
+- apiGroups:
+  - sidecar.bvwells.github.com
+  resources:
+  - sidecaroperators
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - sidecar.bvwells.github.com
+  resources:
+  - sidecaroperators/status
+  verbs:
+  - get
