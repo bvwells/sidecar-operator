@@ -1,4 +1,14 @@
 # sidecar-operator
+
+
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/bvwells/sidecar-operator?tab=overview)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/bvwells/sidecar-operator)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/bvwells/sidecar-operator) 
+[![Build Status](https://travis-ci.com/bvwells/sidecar-operator.svg?branch=master)](https://travis-ci.com/bvwells/sidecar-operator)
+[![Build status](https://ci.appveyor.com/api/projects/status/ea2u4hpy555b6ady?svg=true)](https://ci.appveyor.com/project/bvwells/sidecar-operator)
+[![codecov](https://codecov.io/gh/bvwells/sidecar-operator/branch/master/graph/badge.svg)](https://codecov.io/gh/bvwells/sidecar-operator)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bvwells/sidecar-operator)](https://goreportcard.com/report/github.com/bvwells/sidecar-operator)
+
 Demo kubernetes operator for injecting sidecars
 
 ## Install Kubernetes operator framework SDK
