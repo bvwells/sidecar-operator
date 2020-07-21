@@ -11,12 +11,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sidecarv1alpha1 "github.com/bvwells/sidecar-operator/api/v1alpha1"
 )
 
-const sidecarContainerName = "sidecar-container"
+const (
+	sidecarContainerName     = "sidecar-container"
+	sidecarOperatorFinalizer = "finalizer.bvwells.github.com"
+)
 
 // SidecarOperatorReconciler reconciles a SidecarOperator object
 type SidecarOperatorReconciler struct {
@@ -44,6 +48,35 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
+	}
+
+	// Check if the SidecarOperator instance is marked to be deleted, which is
+	// indicated by the deletion timestamp being set.
+	if sidecarOperator.DeletionTimestamp != nil {
+		if contains(sidecarOperator.GetFinalizers(), sidecarOperatorFinalizer) {
+			// Run finalization logic for sidecarOperatorFinalizer. If the
+			// finalization logic fails, don't remove the finalizer so
+			// that we can retry during the next reconciliation.
+			if err := r.finalizeSidecarOperator(ctx, logger, sidecarOperator); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// Remove sidecarOperatorFinalizer. Once all finalizers have been
+			// removed, the object will be deleted.
+			controllerutil.RemoveFinalizer(sidecarOperator, sidecarOperatorFinalizer)
+			err := r.Update(ctx, sidecarOperator)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer for this CR
+	if !contains(sidecarOperator.GetFinalizers(), sidecarOperatorFinalizer) {
+		if err := r.addFinalizer(ctx, logger, sidecarOperator); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	image := sidecarOperator.Spec.Image
@@ -85,7 +118,6 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	// TODO - watch for new deployments.
-	// TODO - set controller reference for newly created resources.
 
 	return ctrl.Result{}, nil
 }
@@ -103,4 +135,64 @@ func newSidecarContainer(image string) corev1.Container {
 		Image:   image,
 		Command: []string{"sleep", "3600"},
 	}
+}
+
+func (r *SidecarOperatorReconciler) finalizeSidecarOperator(ctx context.Context,
+	logger logr.Logger, s *sidecarv1alpha1.SidecarOperator) error {
+
+	deployments := &appsv1.DeploymentList{}
+	if err := r.List(ctx, deployments); err != nil {
+		return err
+	}
+
+	for _, deployment := range deployments.Items {
+
+		deleteSidecar := false
+		n := 0
+		for _, container := range deployment.Spec.Template.Spec.Containers {
+			if container.Name != sidecarContainerName {
+				deployment.Spec.Template.Spec.Containers[n] = container
+				n++
+			} else {
+				deleteSidecar = true
+			}
+		}
+		deployment.Spec.Template.Spec.Containers = deployment.Spec.Template.Spec.Containers[:n]
+
+		if deleteSidecar {
+			logger.Info(fmt.Sprintf("removing sidecar from deployment '%s'", deployment.Name))
+			err := r.Update(ctx, &deployment, &client.UpdateOptions{})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	logger.Info("Successfully finalized sidecar operator")
+
+	return nil
+}
+
+func (r *SidecarOperatorReconciler) addFinalizer(ctx context.Context,
+	logger logr.Logger, s *sidecarv1alpha1.SidecarOperator) error {
+	logger.Info("Adding Finalizer for the sidecar operator")
+
+	controllerutil.AddFinalizer(s, sidecarOperatorFinalizer)
+
+	// Update CR
+	err := r.Update(ctx, s)
+	if err != nil {
+		logger.Error(err, "Failed to update SidecarOperator with finalizer")
+		return err
+	}
+	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
