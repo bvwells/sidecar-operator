@@ -89,9 +89,7 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	for _, deployment := range deployments.Items {
-
 		injectSidecar := true
-
 		for i, container := range deployment.Spec.Template.Spec.Containers {
 			// Deployment has existing sidecar
 			if container.Name == sidecarContainerName {
@@ -139,14 +137,12 @@ func newSidecarContainer(image string) corev1.Container {
 
 func (r *SidecarOperatorReconciler) finalizeSidecarOperator(ctx context.Context,
 	logger logr.Logger, s *sidecarv1alpha1.SidecarOperator) error {
-
 	deployments := &appsv1.DeploymentList{}
 	if err := r.List(ctx, deployments); err != nil {
 		return err
 	}
 
 	for _, deployment := range deployments.Items {
-
 		deleteSidecar := false
 		n := 0
 		for _, container := range deployment.Spec.Template.Spec.Containers {
