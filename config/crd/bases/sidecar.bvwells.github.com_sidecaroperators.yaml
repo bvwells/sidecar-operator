@@ -42,6 +42,12 @@ spec:
           type: object
         status:
           description: SidecarOperatorStatus defines the observed state of SidecarOperator
+          properties:
+            status:
+              description: Status is the status of the operator.
+              type: string
+          required:
+          - status
           type: object
       type: object
   version: v1alpha1

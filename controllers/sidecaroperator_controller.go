@@ -3,18 +3,20 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
+
+	sidecarv1alpha1 "github.com/bvwells/sidecar-operator/api/v1alpha1"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	sidecarv1alpha1 "github.com/bvwells/sidecar-operator/api/v1alpha1"
 )
 
 const (
@@ -50,10 +52,12 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return reconcile.Result{}, err
 	}
 
+	finalizers := sets.NewString(sidecarOperator.GetFinalizers()...)
+
 	// Check if the SidecarOperator instance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
 	if sidecarOperator.DeletionTimestamp != nil {
-		if contains(sidecarOperator.GetFinalizers(), sidecarOperatorFinalizer) {
+		if finalizers.Has(sidecarOperatorFinalizer) {
 			// Run finalization logic for sidecarOperatorFinalizer. If the
 			// finalization logic fails, don't remove the finalizer so
 			// that we can retry during the next reconciliation.
@@ -73,7 +77,7 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	// Add finalizer for this CR
-	if !contains(sidecarOperator.GetFinalizers(), sidecarOperatorFinalizer) {
+	if !finalizers.Has(sidecarOperatorFinalizer) {
 		if err := r.addFinalizer(ctx, logger, sidecarOperator); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -89,30 +93,20 @@ func (r *SidecarOperatorReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	for _, deployment := range deployments.Items {
-		injectSidecar := true
-		for i, container := range deployment.Spec.Template.Spec.Containers {
-			// Deployment has existing sidecar
-			if container.Name == sidecarContainerName {
-				injectSidecar = false
-				// Sidecar image does not match
-				if container.Image != image {
-					logger.Info(fmt.Sprintf("upgrading deployment '%s' to use image '%s'", deployment.Name, image))
-					deployment.Spec.Template.Spec.Containers[i] = newSidecarContainer(image)
-				} else {
-					continue
-				}
-			}
-		}
-		if injectSidecar {
-			logger.Info(fmt.Sprintf("adding sidecar to deployment '%s'", deployment.Name))
-			container := newSidecarContainer(image)
-			deployment.Spec.Template.Spec.Containers = append(deployment.Spec.Template.Spec.Containers, container)
-		}
+		podSpec := &deployment.Spec.Template.Spec
+
+		podSpec.Containers = upgradeInjectedContainer(podSpec.Containers, image)
+
+		podSpec.Containers = injectContainer(podSpec.Containers, image)
 
 		err = r.Update(ctx, &deployment, &client.UpdateOptions{})
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+	}
+
+	if err := r.setStatus(ctx, sidecarOperator, "Healthy"); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// TODO - watch for new deployments.
@@ -143,24 +137,11 @@ func (r *SidecarOperatorReconciler) finalizeSidecarOperator(ctx context.Context,
 	}
 
 	for _, deployment := range deployments.Items {
-		deleteSidecar := false
-		n := 0
-		for _, container := range deployment.Spec.Template.Spec.Containers {
-			if container.Name != sidecarContainerName {
-				deployment.Spec.Template.Spec.Containers[n] = container
-				n++
-			} else {
-				deleteSidecar = true
-			}
-		}
-		deployment.Spec.Template.Spec.Containers = deployment.Spec.Template.Spec.Containers[:n]
-
-		if deleteSidecar {
-			logger.Info(fmt.Sprintf("removing sidecar from deployment '%s'", deployment.Name))
-			err := r.Update(ctx, &deployment, &client.UpdateOptions{})
-			if err != nil {
-				return err
-			}
+		podSpec := &deployment.Spec.Template.Spec
+		podSpec.Containers = removeInjectedContainer(podSpec.Containers)
+		err := r.Update(ctx, &deployment, &client.UpdateOptions{})
+		if err != nil {
+			return err
 		}
 	}
 
@@ -184,11 +165,47 @@ func (r *SidecarOperatorReconciler) addFinalizer(ctx context.Context,
 	return nil
 }
 
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
+func (r *SidecarOperatorReconciler) setStatus(ctx context.Context,
+	s *sidecarv1alpha1.SidecarOperator, status string) error {
+	if !reflect.DeepEqual(status, s.Status.Status) {
+		s.Status.Status = status
+		err := r.Status().Update(ctx, s)
+		if err != nil {
+			return err
 		}
 	}
-	return false
+	return nil
+}
+
+func injectContainer(containers []corev1.Container, image string) []corev1.Container {
+	for _, c := range containers {
+		if c.Name == sidecarContainerName {
+			return containers
+		}
+	}
+	containers = append(containers, newSidecarContainer(image))
+	return containers
+}
+
+func upgradeInjectedContainer(containers []corev1.Container, image string) []corev1.Container {
+	for index, c := range containers {
+		if c.Name == sidecarContainerName {
+			containers[index] = newSidecarContainer(image)
+		}
+	}
+	return containers
+}
+
+func removeInjectedContainer(containers []corev1.Container) []corev1.Container {
+	for index, c := range containers {
+		if c.Name == sidecarContainerName {
+			if index < len(containers)-1 {
+				containers = append(containers[:index], containers[index+1:]...)
+			} else {
+				containers = containers[:index]
+			}
+			break
+		}
+	}
+	return containers
 }
