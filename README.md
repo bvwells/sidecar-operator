@@ -44,11 +44,15 @@ $ operator-sdk create api --version=v1alpha1 --kind=SidecarOperator --group=side
 
 Modify types api/v1alpha1/sidecaroperator_types.go and to update generated code run:
 
+```
 $ make generate
+```
 
 To update the CRD manifests run:
 
+```
 $ make manifests
+```
 
 ## Deploy the CRD
 
